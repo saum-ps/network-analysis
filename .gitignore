@@ -1,0 +1,29 @@
+############################
+# Project-level ignore file #
+############################
+
+# --- raw & derived data -----------------------------------
+data/
+parquet/
+*.parquet
+*.pkl
+*.zip
+
+# --- notebooks --------------------------------------------
+.ipynb_checkpoints/
+
+# --- python artefacts -------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# --- editor / IDE settings --------------------------------
+.vscode/
+.idea/
+
+# --- OS artefacts -----------------------------------------
+.DS_Store
+Thumbs.db
+
+# --- static reference docs (kept outside Git) -------------
+Instructions/
