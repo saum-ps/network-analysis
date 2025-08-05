@@ -35,6 +35,8 @@ These map 1-to-1 onto our internal schema and cover ~700 users.
 * Ten callable functions (≤ 25 lines each) answer the scorecard questions (top ties, reciprocity, churn, spam, …).  
 * Temporal signals computed on **7-day rolling windows** (trend, churn, bursts).
 
+*CNS timestamps are relative to study start, not Unix. We assume study_start = datetime(2013, 9, 1) based on metadata from the CNS paper and weekly activity patterns.
+
 
 ## 6 . Atomic Development Steps
 > Each task number is referenced in parentheses for `TASKS.md` to link back.
@@ -47,6 +49,12 @@ These map 1-to-1 onto our internal schema and cover ~700 users.
 ### Day 1 – Ingest & Schema
 1.1  Download and unzip CNS `sms.csv.zip`, `calls.csv.zip`  
 1.2  Implement `load_and_normalise()` → canonical DF [`id`, `type`, `sender`, `recipient`, `sent`, `duration`, `direction`]  
+
+*Implement load_and_normalise():
+    -Read raw CSVs without headers
+    -Use column names: ["source", "target", "timestamp", "duration"] (calls), and skip duration for SMS
+    -Convert timestamp → datetime using relative offset
+    -Return canonical DF: ["src", "dst", "timestamp", "duration", "channel"]
 1.3  Concatenate layers; partition-write Parquet `parquet/type=.../year=YYYY/month=MM/`  
 1.4  Unit tests: row counts, null checks, schema match
 
