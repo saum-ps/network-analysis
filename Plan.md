@@ -27,7 +27,8 @@ These map 1-to-1 onto our internal schema and cover ~700 users.
 * **Edge weight**: `weight = duration_sec + 30 * sms_count`.  
 * **Coding standards**: black-formatted, typed, doc-stringed.  
 * **No raw CSV/ZIP in git** — only Parquet or pickles (git-ignored).  
-* Must allow **GPU selector** → default to local GTX 1650, but overridable by env var `SG_GPU_ID`.
+* Must allow **GPU selector** → default to local GTX 1650, but overridable via `SOCIAL_DEVICE` env var (used by `utils/device.py`)
+
 
 ## 5 . Insights & Design Notes  
 * Treat SMS and CALL as **layers** in a `networkx.MultiDiGraph`.  
@@ -36,6 +37,8 @@ These map 1-to-1 onto our internal schema and cover ~700 users.
 * Temporal signals computed on **7-day rolling windows** (trend, churn, bursts).
 
 *CNS timestamps are relative to study start, not Unix. We assume study_start = datetime(2013, 9, 1) based on metadata from the CNS paper and weekly activity patterns.
+* GPU/CPU device handling is centralized in `utils/device.py` → used in any Torch-based logic; supports override via `SOCIAL_DEVICE` env var.
+
 
 
 ## 6 . Atomic Development Steps

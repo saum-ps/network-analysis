@@ -95,3 +95,12 @@
 * **Insight**: Now edits in either `.ipynb` or `.py` stay consistent
 * **Next**: Begin implementing `build_multilayer_graph()` in `02_graph_build.ipynb`
 * **Ref**: Commit `4`
+
+
+---
+
+### 2025-08-04  18:25
+* **Progress**: Created `utils/device.py` to provide flexible GPU/CPU selector `[0.1]`
+* **Insight**: Allows runtime override via `SOCIAL_DEVICE` env var (e.g., `"cpu"` or `"cuda:1"`); defaults to `cuda:0` if available
+* **Next**: Use `get_device()` in graph-building or metric functions to place tensors on the correct device
+* **Ref**: Commit `4`, file path: `utils/device.py`
