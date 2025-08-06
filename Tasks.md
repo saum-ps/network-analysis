@@ -104,3 +104,27 @@
 * **Insight**: Allows runtime override via `SOCIAL_DEVICE` env var (e.g., `"cpu"` or `"cuda:1"`); defaults to `cuda:0` if available
 * **Next**: Use `get_device()` in graph-building or metric functions to place tensors on the correct device
 * **Ref**: Commit `4`, file path: `utils/device.py`
+
+---
+
+### 2025-08-04  18:45
+* **Progress**: Completed `SETUP_OK.txt` with CUDA verification `[0.2]`
+* **Insight**: CUDA is available with NVIDIA GeForce GTX 1650; environment ready for GPU-accelerated graph processing
+* **Next**: Begin Day 2 - create `02_graph_build.ipynb` and implement `build_multilayer_graph()`
+* **Ref**: `SETUP_OK.txt` contains device details, Day 0 complete
+
+---
+
+### 2025-08-04  19:15
+* **Progress**: Created `02_graph_build.py` and implemented core graph functions `[2.1]`, `[2.2]`
+* **Insight**: Successfully built multilayer graph (568 nodes, 27933 edges) → collapsed to weighted graph (568 nodes, 2102 edges)
+* **Next**: Implement remaining 7 metric functions (detect_circles, relationship_trend, etc.)
+* **Ref**: `02_graph_build.py`, `graph.pkl`, `node_metrics.csv` created
+
+---
+
+### 2025-08-04  19:45
+* **Progress**: Implemented all 10 metric functions `[2.3]` and completed Day 2 deliverables
+* **Insight**: All functions ≤ 25 lines as required; metrics include extrovert_score, churn_rate, spam detection
+* **Next**: Begin Day 3 - create `03_analytics.ipynb` for community detection and temporal analysis
+* **Ref**: `02_graph_build.py` complete, `node_metrics.csv` updated with comprehensive metrics

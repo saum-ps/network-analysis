@@ -1,0 +1,4 @@
+CUDA Available: True
+Device Count: 1
+Primary Device: NVIDIA GeForce GTX 1650
+Default Device: cuda:0
