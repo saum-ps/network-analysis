@@ -1,7 +1,7 @@
 # ---
 # jupyter:
 #   jupytext:
-#     cell_metadata_filter: -all
+#     cell_metadata_filter: title,-all
 #     formats: ipynb,py:percent
 #     text_representation:
 #       extension: .py
@@ -26,414 +26,222 @@
 # - Export `graph.pkl`, `node_metrics.csv`
 
 # %%
+# %%
+# %%
+"""
+02 – Build Social Graph & Metrics (CNS POC)
+------------------------------------------------
+Reads all Parquet partitions, constructs a multilayer graph, collapses it
+into a single weighted digraph, and exposes the nine analytics callables.
+"""
+
+# %% [imports]
+from __future__ import annotations
+import pickle
+from pathlib import Path
+from typing import Dict, List, Tuple
 import pandas as pd
 import networkx as nx
-import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional
-import pickle
-from utils.device import get_device
+from datetime import timedelta
+from utils.device import get_device  # GPU helper (currently unused but kept for future GNN work)
 
-# %%
-# Load the processed data
-print("Loading processed CNS data...")
-df = pd.read_parquet("parquet/year_month=2013-09.parquet")
-print(f"Loaded {len(df)} interactions")
-print(f"Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
-print(f"Unique users: {df['src'].nunique()}")
-print(f"Channels: {df['channel'].unique()}")
+# %% [constants]
+SMS_WEIGHT: int = 30          # seconds‑credit per SMS
+TREND_WIN_DAYS: int = 7       # rolling‑window size for trend/churn
+MIN_EVENTS_PREF: int = 5      # min interactions to label channel preference
+PREF_THRESHOLD: float = 0.60  # 60 % rule
+MIN_WEIGHT_TOPTIE: int = 90   # ignore ties < 90 s total weight
+CHURN_DROP_RATIO: float = 0.40  # current wk inbound < 40 % prev wk
 
-# %%
+RAW_PARQUET_DIR = Path("parquet")
+GRAPH_PKL = Path("graph.pkl")
+NODE_CSV = Path("node_metrics.csv")
+
+# %% [loader]
+def load_all_partitions(parquet_dir: Path = RAW_PARQUET_DIR) -> pd.DataFrame:
+    """Load every Parquet file under *parquet_dir* into one DataFrame."""
+    parts = list(parquet_dir.rglob("*.parquet"))
+    if not parts:
+        raise FileNotFoundError("No Parquet files found – run 01_ingest first.")
+    return pd.concat((pd.read_parquet(p) for p in parts), ignore_index=True)
+
+# %% [graph builders]
 def build_multilayer_graph(df: pd.DataFrame) -> nx.MultiDiGraph:
-    """
-    Build multilayer directed graph from CNS interaction data.
-    
-    Args:
-        df: DataFrame with columns ['src', 'dst', 'timestamp', 'duration', 'channel']
-    
-    Returns:
-        MultiDiGraph with edge attributes: layer, duration, sent
-    """
+    """Return MultiDiGraph with separate edges for call vs sms (directed)."""
     G = nx.MultiDiGraph()
-    
-    # Add nodes (all unique users)
-    all_users = set(df['src'].unique()) | set(df['dst'].unique())
-    G.add_nodes_from(all_users)
-    
-    # Add edges with layer information
-    for _, row in df.iterrows():
-        src, dst = row['src'], row['dst']
-        duration = row.get('duration', 0)  # SMS has no duration
-        channel = row['channel']
-        
-        # Edge attributes
-        edge_attrs = {
-            'layer': channel,
-            'duration': duration,
-            'sent': row['timestamp'],
-            'weight': duration + (30 if channel == 'sms' else 0)  # SMS weight = 30
-        }
-        
-        G.add_edge(src, dst, **edge_attrs)
-    
+    for row in df.itertuples(index=False):
+        weight = row.duration if row.channel == "call" else SMS_WEIGHT
+        key = row.channel  # distinguishes parallel edges
+        G.add_edge(row.src, row.dst, key=key, channel=row.channel, weight=weight)
     return G
 
-# %%
-def collapse_edges(G: nx.MultiDiGraph) -> nx.DiGraph:
-    """
-    Collapse multilayer graph to weighted directed graph.
-    
-    Edge weight formula: duration_sec + 30 * sms_count
-    
-    Args:
-        G: MultiDiGraph with edge attributes
-    
-    Returns:
-        DiGraph with weighted edges
-    """
-    G_collapsed = nx.DiGraph()
-    G_collapsed.add_nodes_from(G.nodes())
-    
-    # Aggregate edges between each pair
-    for u, v in G.edges():
-        if u == v:  # Skip self-loops
-            continue
-            
-        # Get all edges between u and v
-        edges_data = G.get_edge_data(u, v)
+
+def collapse_edges(mg: nx.MultiDiGraph) -> nx.DiGraph:
+    """Sum weights per direction; keep channel‑specific counts in attributes."""
+    cg = nx.DiGraph()
+    for u, v, data in mg.edges(data=True):
+        # Get existing edge data or create new
+        if cg.has_edge(u, v):
+            edge_data = cg[u][v]
+        else:
+            edge_data = {
+                "weight": 0,
+                "call_weight": 0,
+                "sms_weight": 0,
+                "call_count": 0,
+                "sms_count": 0,
+            }
+            cg.add_edge(u, v, **edge_data)
         
-        total_weight = 0
-        total_duration = 0
-        sms_count = 0
-        call_count = 0
-        
-        for edge_key, edge_attrs in edges_data.items():
-            layer = edge_attrs['layer']
-            duration = edge_attrs.get('duration', 0)
-            
-            if layer == 'sms':
-                sms_count += 1
-            else:  # call
-                call_count += 1
-                total_duration += duration
-        
-        # Calculate weight: duration_sec + 30 * sms_count
-        weight = total_duration + 30 * sms_count
-        
-        if weight > 0:
-            G_collapsed.add_edge(u, v, weight=weight, 
-                                duration=total_duration, 
-                                sms_count=sms_count,
-                                call_count=call_count)
-    
-    return G_collapsed
+        if data["channel"] == "call":
+            edge_data["call_weight"] += data["weight"]
+            edge_data["call_count"] += 1
+        else:
+            edge_data["sms_weight"] += data["weight"]
+            edge_data["sms_count"] += 1
+        edge_data["weight"] = edge_data["call_weight"] + edge_data["sms_weight"]
+    return cg
 
-# %%
-# Build the multilayer graph
-print("Building multilayer graph...")
-G_multilayer = build_multilayer_graph(df)
-print(f"Multilayer graph: {G_multilayer.number_of_nodes()} nodes, {G_multilayer.number_of_edges()} edges")
+# %% [callables]
 
-# Collapse to weighted graph
-print("Collapsing to weighted graph...")
-G = collapse_edges(G_multilayer)
-print(f"Weighted graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+def top_ties(G: nx.DiGraph, user: int, k: int = 5, min_weight: int = MIN_WEIGHT_TOPTIE) -> List[Tuple[int, float]]:
+    neigh: Dict[int, float] = {}
+    for nbr in G.successors(user):
+        neigh[nbr] = neigh.get(nbr, 0) + G[user][nbr]["weight"]
+    for nbr in G.predecessors(user):
+        neigh[nbr] = neigh.get(nbr, 0) + G[nbr][user]["weight"]
+    return sorted(
+        [(n, w) for n, w in neigh.items() if w >= min_weight],
+        key=lambda x: x[1],
+        reverse=True,
+    )[:k]
 
-# %%
-# Core metric functions (≤ 25 lines each)
 
-def top_ties(G: nx.DiGraph, user: int, top_k: int = 5) -> List[Tuple[int, float]]:
-    """Get user's top-k ties by weight."""
-    if user not in G:
-        return []
-    
-    # Get outgoing edges with weights
-    edges = [(v, G[u][v]['weight']) for u, v in G.out_edges(user)]
-    edges.extend([(u, G[u][v]['weight']) for u, v in G.in_edges(user)])
-    
-    # Aggregate weights per neighbor
-    neighbor_weights = {}
-    for neighbor, weight in edges:
-        neighbor_weights[neighbor] = neighbor_weights.get(neighbor, 0) + weight
-    
-    # Sort by weight and return top-k
-    sorted_ties = sorted(neighbor_weights.items(), key=lambda x: x[1], reverse=True)
-    return sorted_ties[:top_k]
-
-def channel_preference(G: nx.DiGraph, user1: int, user2: int) -> str:
-    """Determine preferred channel (sms vs call) for a user pair."""
-    if not G.has_edge(user1, user2) and not G.has_edge(user2, user1):
-        return "no_interaction"
-    
-    # Get edge data
-    edge_data = G.get_edge_data(user1, user2) or G.get_edge_data(user2, user1) or {}
-    
-    sms_count = edge_data.get('sms_count', 0)
-    call_count = edge_data.get('call_count', 0)
-    
-    if sms_count > call_count:
+def channel_preference(G: nx.DiGraph, a: int, b: int) -> str:
+    edge_ab = G.get_edge_data(a, b, default={})
+    edge_ba = G.get_edge_data(b, a, default={})
+    sms = edge_ab.get("sms_count", 0) + edge_ba.get("sms_count", 0)
+    calls = edge_ab.get("call_count", 0) + edge_ba.get("call_count", 0)
+    total = sms + calls
+    if total < MIN_EVENTS_PREF:
+        return "undetermined"
+    sms_ratio = sms / total
+    if sms_ratio >= PREF_THRESHOLD:
         return "sms"
-    elif call_count > sms_count:
+    if sms_ratio <= 1 - PREF_THRESHOLD:
         return "call"
-    else:
-        return "equal"
+    return "balanced"
+
 
 def reciprocity(G: nx.DiGraph, user: int) -> float:
-    """Calculate user's reciprocity score (bidirectional connections)."""
-    if user not in G:
-        return 0.0
-    
-    outgoing = set(G.successors(user))
-    incoming = set(G.predecessors(user))
-    
-    if not outgoing and not incoming:
-        return 0.0
-    
-    # Count bidirectional connections
-    bidirectional = outgoing & incoming
-    total_connections = outgoing | incoming
-    
-    return len(bidirectional) / len(total_connections) if total_connections else 0.0
+    in_w = sum(data["weight"] for _, _, data in G.in_edges(user, data=True))
+    total_w = in_w + sum(data["weight"] for _, _, data in G.out_edges(user, data=True))
+    return 0.0 if total_w == 0 else in_w / total_w
 
-def detect_circles(G: nx.DiGraph, user: int) -> List[List[int]]:
-    """Discover social circles for a user using community detection."""
-    if user not in G:
-        return []
-    
-    # Create undirected subgraph around user (2-hop neighborhood)
-    neighbors = set(G.predecessors(user)) | set(G.successors(user))
-    two_hop = set()
-    for neighbor in neighbors:
-        two_hop.update(G.predecessors(neighbor))
-        two_hop.update(G.successors(neighbor))
-    
-    # Include user and immediate neighbors
-    subgraph_nodes = {user} | neighbors | two_hop
-    subgraph = G.subgraph(subgraph_nodes).to_undirected()
-    
-    # Use Louvain community detection
-    try:
-        communities = nx.community.louvain_communities(subgraph)
-        return [list(comm) for comm in communities if len(comm) > 1]
-    except:
-        return []
 
-def relationship_trend(G: nx.DiGraph, user1: int, user2: int, df: pd.DataFrame) -> str:
-    """Determine if relationship is growing or fading based on temporal data."""
-    if not G.has_edge(user1, user2) and not G.has_edge(user2, user1):
-        return "no_relationship"
-    
-    # Get interactions between users
-    interactions = df[(df['src'] == user1) & (df['dst'] == user2) | 
-                     (df['src'] == user2) & (df['dst'] == user1)]
-    
-    if len(interactions) < 2:
+def detect_circles(G: nx.DiGraph, user: int) -> List[int]:
+    import networkx.algorithms.community as nx_comm
+
+    UG = nx.Graph()
+    for u, v, data in G.edges(data=True):
+        UG.add_edge(u, v, weight=data["weight"])
+    for res in [1.0, 0.5, 1.5]:  # retry with diff resolution if degenerate
+        part = nx_comm.louvain_communities(UG, weight="weight", resolution=res)
+        if 1 < len(part) < len(UG):
+            break
+    for cid, community in enumerate(part):
+        if user in community:
+            return list(community)
+    return []
+
+
+def relationship_trend(df_pair: pd.DataFrame) -> str:
+    if df_pair.empty:
         return "insufficient_data"
-    
-    # Split into first and second half
-    sorted_interactions = interactions.sort_values('timestamp')
-    mid_point = len(sorted_interactions) // 2
-    
-    first_half = sorted_interactions.iloc[:mid_point]
-    second_half = sorted_interactions.iloc[mid_point:]
-    
-    # Compare activity levels
-    first_activity = len(first_half)
-    second_activity = len(second_half)
-    
-    if second_activity > first_activity * 1.2:
+    df_pair = df_pair.set_index("sent").sort_index()
+    weekly = df_pair["weight"].resample(f"{TREND_WIN_DAYS}D").sum()
+    if len(weekly) < 3:
+        return "insufficient_data"
+    change = (weekly.iloc[-1] - weekly.iloc[-2]) / max(1e-6, weekly.iloc[-2])
+    if change > 0.25:
         return "growing"
-    elif first_activity > second_activity * 1.2:
+    if change < -0.25:
         return "fading"
-    else:
-        return "stable"
+    return "stable"
 
-def avg_reply_delay(G: nx.DiGraph, user1: int, user2: int, df: pd.DataFrame) -> float:
-    """Calculate average reply delay between two users."""
-    # Get all interactions between users
-    interactions = df[(df['src'] == user1) & (df['dst'] == user2) | 
-                     (df['src'] == user2) & (df['dst'] == user1)].sort_values('timestamp')
-    
-    if len(interactions) < 2:
-        return float('inf')
-    
+
+def avg_reply_delay(df_pair: pd.DataFrame) -> float | None:
+    if df_pair.empty:
+        return None
+    df_pair = df_pair.sort_values("sent")
     delays = []
-    for i in range(len(interactions) - 1):
-        current = interactions.iloc[i]
-        next_interaction = interactions.iloc[i + 1]
-        
-        # If next interaction is from different user, it's a reply
-        if current['src'] != next_interaction['src']:
-            delay = next_interaction['timestamp'] - current['timestamp']  # Integer difference
-            delays.append(delay)
-    
-    return np.mean(delays) if delays else float('inf')
+    last_out_ts = None
+    last_out_sender = None
+    for row in df_pair.itertuples(index=False):
+        s, d, ts = row.src, row.dst, row.sent
+        if last_out_ts is not None and last_out_sender != s:
+            delays.append((ts - last_out_ts).total_seconds())
+        last_out_ts, last_out_sender = ts, s
+    return None if not delays else sum(delays) / len(delays)
 
-def extrovert_score(G: nx.DiGraph, user: int) -> float:
-    """Calculate extrovert score based on outgoing connections and bridge role."""
-    if user not in G:
-        return 0.0
-    
-    # Outgoing degree (initiative)
-    out_degree = G.out_degree(user)
-    
-    # Bridge score (connectivity between communities)
-    neighbors = list(G.successors(user)) + list(G.predecessors(user))
-    if len(neighbors) < 2:
-        return out_degree
-    
-    # Calculate local clustering coefficient
-    local_clustering = nx.clustering(G, user) if len(neighbors) > 1 else 0
-    
-    # Extrovert score: high outgoing degree, low clustering (bridge role)
-    extrovert_score = out_degree * (1 - local_clustering)
-    
-    return extrovert_score
 
-def churn_drop(G: nx.DiGraph, user: int, df: pd.DataFrame, weeks: int = 4) -> float:
-    """Detect weekly inbound-drop churn for a user."""
-    if user not in G:
-        return 0.0
-    
-    # Get all interactions involving user
-    user_interactions = df[(df['src'] == user) | (df['dst'] == user)].sort_values('timestamp')
-    
-    if len(user_interactions) < 10:
-        return 0.0
-    
-    # Split into weekly periods (timestamps are relative integers)
-    min_time = user_interactions['timestamp'].min()
-    max_time = user_interactions['timestamp'].max()
-    total_time = max_time - min_time
-    
-    if total_time < weeks * 7:  # Need at least 4 weeks of data
-        return 0.0
-    
-    # Calculate weekly inbound counts
-    weekly_inbound = []
-    week_duration = total_time // weeks
-    
-    for week in range(weeks):
-        week_start = min_time + (week * week_duration)
-        week_end = week_start + week_duration if week < weeks - 1 else max_time + 1
-        
-        week_interactions = user_interactions[
-            (user_interactions['timestamp'] >= week_start) & 
-            (user_interactions['timestamp'] < week_end) &
-            (user_interactions['dst'] == user)
-        ]
-        
-        weekly_inbound.append(len(week_interactions))
-    
-    # Calculate drop rate
-    if weekly_inbound[0] == 0:
-        return 0.0
-    
-    drop_rate = (weekly_inbound[0] - weekly_inbound[-1]) / weekly_inbound[0]
-    return max(0, drop_rate)
+def extrovert_score(G: nx.DiGraph, top_n: int = 10) -> List[Tuple[int, float]]:
+    deg = {n: sum(data["weight"] for _, _, data in G.out_edges(n, data=True)) for n in G}
+    bet = nx.betweenness_centrality(G, weight="weight", normalized=True)
+    score = {n: deg.get(n, 0) + bet.get(n, 0) * 1000 for n in G}
+    return sorted(score.items(), key=lambda x: x[1], reverse=True)[:top_n]
 
-def find_spam_nodes(G: nx.DiGraph, threshold: float = 0.8) -> List[int]:
-    """Find potential spam/harassment nodes based on activity patterns."""
-    spam_nodes = []
-    
-    for node in G.nodes():
-        out_degree = G.out_degree(node)
-        in_degree = G.in_degree(node)
-        
-        if out_degree == 0:
-            continue
-        
-        # Calculate spam indicators
-        reply_ratio = in_degree / out_degree if out_degree > 0 else 0
-        activity_ratio = out_degree / (out_degree + in_degree) if (out_degree + in_degree) > 0 else 0
-        
-        # High outgoing, low incoming, low replies = potential spam
-        if activity_ratio > threshold and reply_ratio < (1 - threshold):
-            spam_nodes.append(node)
-    
-    return spam_nodes
 
-# %%
-# Test the core metrics
-print("Testing core metrics...")
+def churn_drop(G: nx.DiGraph, user: int) -> Tuple[bool, float]:
+    inbound = [data["weight"] for _, _, data in G.in_edges(user, data=True)]
+    if not inbound:
+        return False, 0.0
+    # Build per‑edge DataFrame of timestamps & weights
+    rows = []
+    for src, _, data in G.in_edges(user, data=True):
+        rows.extend([(src, t, w) for t, w in data.get("timestamps", [])])
+    if not rows:
+        return False, 0.0
+    df = pd.DataFrame(rows, columns=["src", "sent", "weight"]).set_index("sent").sort_index()
+    weekly = df["weight"].resample("7D").sum()
+    if len(weekly) < 2:
+        return False, 0.0
+    ratio = weekly.iloc[-1] / max(1e-6, weekly.iloc[-2])
+    return ratio < CHURN_DROP_RATIO, ratio
 
-# Test top_ties
-test_user = list(G.nodes())[0]
-top_connections = top_ties(G, test_user)
-print(f"Top ties for user {test_user}: {top_connections[:3]}")
 
-# Test channel_preference
-if G.number_of_edges() > 0:
-    edge = list(G.edges())[0]
-    preference = channel_preference(G, edge[0], edge[1])
-    print(f"Channel preference for {edge}: {preference}")
+def find_spam_nodes(G: nx.DiGraph) -> List[int]:
+    suspects = []
+    for n in G.nodes:
+        out_w = sum(data["weight"] for _, _, data in G.out_edges(n, data=True))
+        in_w = sum(data["weight"] for _, _, data in G.in_edges(n, data=True))
+        if out_w >= 20 * SMS_WEIGHT and (in_w == 0 or out_w / max(1, in_w) > 10):
+            if reciprocity(G, n) < 0.1:
+                suspects.append(n)
+    return suspects
 
-# Test reciprocity
-reciprocity_score = reciprocity(G, test_user)
-print(f"Reciprocity for user {test_user}: {reciprocity_score:.3f}")
+# %% [driver]
+if __name__ == "__main__":
+    df_full = load_all_partitions()
 
-# Test new metrics
-print("\nTesting advanced metrics...")
+    # Build graphs
+    mg = build_multilayer_graph(df_full)
+    cg = collapse_edges(mg)
 
-# Test detect_circles
-circles = detect_circles(G, test_user)
-print(f"Social circles for user {test_user}: {len(circles)} circles found")
+    # Save graph for Day‑3 use
+    with GRAPH_PKL.open("wb") as f:
+        pickle.dump(cg, f)
 
-# Test extrovert_score
-extrovert = extrovert_score(G, test_user)
-print(f"Extrovert score for user {test_user}: {extrovert:.2f}")
+    # Produce node‑level metrics CSV
+    rows = []
+    for n in cg.nodes:
+        rows.append({
+            "node": n,
+            "reciprocity": reciprocity(cg, n),
+            "out_weight": sum(d["weight"] for _, _, d in cg.out_edges(n, data=True)),
+            "in_weight": sum(d["weight"] for _, _, d in cg.in_edges(n, data=True)),
+        })
+    pd.DataFrame(rows).to_csv(NODE_CSV, index=False)
 
-# Test spam detection
-spam_nodes = find_spam_nodes(G)
-print(f"Potential spam nodes found: {len(spam_nodes)}")
-
-# Test relationship trend (if edge exists)
-if G.number_of_edges() > 0:
-    edge = list(G.edges())[0]
-    trend = relationship_trend(G, edge[0], edge[1], df)
-    print(f"Relationship trend for {edge}: {trend}")
-
-# %%
-# Calculate comprehensive metrics for all users
-print("Calculating comprehensive metrics for all users...")
-
-user_metrics = []
-for user in G.nodes():
-    top_5_ties = top_ties(G, user, 5)
-    reciprocity_score = reciprocity(G, user)
-    extrovert_score_val = extrovert_score(G, user)
-    circles = detect_circles(G, user)
-    churn_rate = churn_drop(G, user, df)
-    
-    # Get user's total activity
-    out_degree = G.out_degree(user)
-    in_degree = G.in_degree(user)
-    total_activity = out_degree + in_degree
-    
-    user_metrics.append({
-        'user_id': user,
-        'top_ties': top_5_ties,
-        'reciprocity': reciprocity_score,
-        'extrovert_score': extrovert_score_val,
-        'num_circles': len(circles),
-        'churn_rate': churn_rate,
-        'out_degree': out_degree,
-        'in_degree': in_degree,
-        'total_activity': total_activity
-    })
-
-# %%
-# Export results
-print("Exporting results...")
-
-# Save graph
-with open('graph.pkl', 'wb') as f:
-    pickle.dump(G, f)
-print("Saved graph.pkl")
-
-# Save metrics
-metrics_df = pd.DataFrame(user_metrics)
-metrics_df.to_csv('node_metrics.csv', index=False)
-print("Saved node_metrics.csv")
-
-print(f"Day 2 complete! Graph has {G.number_of_nodes()} nodes and {G.number_of_edges()} edges") 
+    print("Graph construction complete →", GRAPH_PKL)
+    print("Node metrics written →", NODE_CSV)
