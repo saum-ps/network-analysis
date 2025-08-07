@@ -208,3 +208,11 @@
 * **Insight**: Refined the extroversion calculation to better capture outgoing communication patterns and social centrality
 * **Next**: Test updated extrovert scoring with sample users and validate rankings
 * **Ref**: Updated extrovert score logic in `02_graph_build.py`
+
+---
+
+### 2025-08-07  12:00
+* **Progress**: Updated `churn_drop` function in `02_graph_build.py` to improve churn detection accuracy `[2.3]`
+* **Insight**: Enhanced the churn detection algorithm to better identify users with declining communication patterns
+* **Next**: Test updated churn detection with sample data and validate churn predictions
+* **Ref**: Updated churn detection logic in `02_graph_build.py`

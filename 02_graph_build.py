@@ -59,6 +59,8 @@ MIN_REPLY_PAIRS: int = 3      # need at least this many reply pairs
 REPLY_USE_MEDIAN: bool = True # use median over mean for robustness
 BET_SCALE: int = 1000         # keep the betweenness centrality scale
 
+MIN_WEEKLY_BASE: int = 3 * SMS_WEIGHT   # need at least this inbound last week to judge a drop
+MIN_RECENT_SUM: int  = 5 * SMS_WEIGHT   # min (prev + curr) to avoid tiny-sample noise
 CHURN_DROP_RATIO: float = 0.40  # current wk inbound < 40 % prev wk
 
 RAW_PARQUET_DIR = Path("parquet")
@@ -79,7 +81,7 @@ def build_multilayer_graph(df: pd.DataFrame) -> nx.MultiDiGraph:
     G = nx.MultiDiGraph()
     for row in df.itertuples(index=False):
         weight = row.duration if row.channel == "call" else SMS_WEIGHT
-        G.add_edge(row.src, row.dst, key=f"{row.channel}_{row.timestamp}", channel=row.channel, weight=weight)
+        G.add_edge(row.src, row.dst, key=f"{row.channel}_{row.timestamp}", channel=row.channel, weight=weight, sent=row.sent)
     return G
 
 
@@ -98,8 +100,13 @@ def collapse_edges(mg: nx.MultiDiGraph) -> nx.DiGraph:
                 "call_count": 0,
                 "sms_count": 0,
                 "missed_count": 0,
+                "timestamps": []
             }
             cg.add_edge(u, v, **edge_data)
+        
+        # Record timestamp & weight for churn analysis
+        if "sent" in data:
+            edge_data["timestamps"].append((data["sent"], data["weight"]))
         
         if data["channel"] == "call":
             if data["weight"] < 0:
@@ -256,17 +263,26 @@ def churn_drop(G: nx.DiGraph, user: int) -> Tuple[bool, float]:
     inbound = [data["weight"] for _, _, data in G.in_edges(user, data=True)]
     if not inbound:
         return False, 0.0
-    # Build per‑edge DataFrame of timestamps & weights
+
     rows = []
     for src, _, data in G.in_edges(user, data=True):
         rows.extend([(src, t, w) for t, w in data.get("timestamps", [])])
     if not rows:
         return False, 0.0
-    df = pd.DataFrame(rows, columns=["src", "sent", "weight"]).set_index("sent").sort_index()
-    weekly = df["weight"].resample("7D").sum()
+
+    df = (pd.DataFrame(rows, columns=["src", "sent", "weight"])
+            .set_index("sent").sort_index())
+    weekly = df["weight"].resample("7D").sum().fillna(0.0)
     if len(weekly) < 2:
         return False, 0.0
-    ratio = weekly.iloc[-1] / max(1e-6, weekly.iloc[-2])
+
+    prev, curr = float(weekly.iloc[-2]), float(weekly.iloc[-1])
+    ratio = curr / max(1e-6, prev)
+
+    # noise guards: don’t flag churn on tiny activity
+    if prev < MIN_WEEKLY_BASE or (prev + curr) < MIN_RECENT_SUM:
+        return False, ratio
+
     return ratio < CHURN_DROP_RATIO, ratio
 
 
