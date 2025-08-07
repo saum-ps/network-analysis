@@ -216,3 +216,11 @@
 * **Insight**: Enhanced the churn detection algorithm to better identify users with declining communication patterns
 * **Next**: Test updated churn detection with sample data and validate churn predictions
 * **Ref**: Updated churn detection logic in `02_graph_build.py`
+
+---
+
+### 2025-08-07  12:15
+* **Progress**: Added helper function in `02_graph_build.py` to support `relationship_trend` and `avg_reply_delay` functions `[2.3]`
+* **Insight**: Created shared utility function to improve code reusability and reduce duplication between trend and reply delay calculations
+* **Next**: Test helper function with both dependent functions and validate shared logic
+* **Ref**: Added helper function to `02_graph_build.py`

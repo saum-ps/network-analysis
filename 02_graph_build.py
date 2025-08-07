@@ -25,8 +25,7 @@
 # - 10 metric callables (≤ 25 lines each)
 # - Export `graph.pkl`, `node_metrics.csv`
 
-# %%
-# %%
+
 # %%
 """
 02 – Build Social Graph & Metrics (CNS POC)
@@ -66,6 +65,31 @@ CHURN_DROP_RATIO: float = 0.40  # current wk inbound < 40 % prev wk
 RAW_PARQUET_DIR = Path("parquet")
 GRAPH_PKL = Path("graph.pkl")
 NODE_CSV = Path("node_metrics.csv")
+
+
+# %% [Helpers]
+def get_pair_df(df_full: pd.DataFrame, a: int, b: int) -> pd.DataFrame:
+    """
+    Return a tidy dataframe of ALL messages/calls between users a and b.
+    Columns: src, dst, sent (datetime), weight (int seconds), channel ('sms'|'call')
+    """
+    df = df_full[( (df_full["src"]==a) & (df_full["dst"]==b) ) |
+                 ( (df_full["src"]==b) & (df_full["dst"]==a) )].copy()
+    if df.empty:
+        return df
+
+    # make sure 'sent' is datetime 
+    if not pd.api.types.is_datetime64_any_dtype(df["sent"]):
+        df["sent"] = pd.to_datetime(df["sent"])
+
+    # compute weight per event (duration for calls, SMS_WEIGHT for sms)
+    df["weight"] = df.apply(
+        lambda r: (r["duration"] if r.get("channel","")=="call" else SMS_WEIGHT),
+        axis=1
+    )
+
+    # keep only the columns downstream functions expect
+    return df[["src","dst","sent","weight","channel"]].sort_values("sent").reset_index(drop=True)
 
 # %% [loader]
 def load_all_partitions(parquet_dir: Path = RAW_PARQUET_DIR) -> pd.DataFrame:
