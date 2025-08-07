@@ -160,3 +160,27 @@
 * **Insight**: Streamlined dependencies to essential packages only; removed presentation libraries to focus on core analysis functionality
 * **Next**: Test environment setup with simplified requirements
 * **Ref**: `requirements.txt` created with minimal dependencies
+
+---
+
+### 2025-08-07  10:15
+* **Progress**: Updated `02_graph_build.py` script to properly handle missed calls and improve edge weight calculations `[2.2]`
+* **Insight**: Fixed edge aggregation logic to account for bidirectional communication patterns and missed call scenarios
+* **Next**: Regenerate node_metrics.csv with updated graph structure
+* **Ref**: Commit with improved graph building logic
+
+---
+
+### 2025-08-07  10:30
+* **Progress**: Regenerated `node_metrics.csv` with updated graph structure and improved metrics `[2.3]`
+* **Insight**: Updated metrics now reflect more accurate social network patterns including missed calls and bidirectional relationships
+* **Next**: Validate updated metrics against expected social network characteristics
+* **Ref**: `node_metrics.csv` updated with corrected graph data
+
+---
+
+### 2025-08-07  10:45
+* **Progress**: Made a minor update to `01_ingest.py` (ingest logic) to refine parsing/output stability `[1.2]`
+* **Insight**: Small tweak improves consistency of datetime/partitioning without changing downstream schema
+* **Next**: Re-run ingestion to regenerate partitions if needed and sanity-check date ranges
+* **Ref**: Commit updating `01_ingest.py`
