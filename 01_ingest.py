@@ -47,15 +47,15 @@ def load_and_normalise() -> pd.DataFrame:
     study_start = datetime(2013, 9, 1)  # Approximate study start date
     
     # Convert relative seconds to absolute datetime
-    common["datetime"] = study_start + pd.to_timedelta(common["timestamp"], unit='s')
-    common["yyyy_mm"] = common["datetime"].dt.strftime("%Y-%m")
+    common["sent"] = study_start + pd.to_timedelta(common["timestamp"], unit='s')
+    common["yyyy_mm"] = common["sent"].dt.strftime("%Y-%m")
     
     for key, part in common.groupby("yyyy_mm"):
-        part.drop(columns=["yyyy_mm", "datetime"]).to_parquet(OUT / f"year_month={key}.parquet", index=False)
+        part.drop(columns=["yyyy_mm"]).to_parquet(OUT / f"year_month={key}.parquet", index=False)
 
     return common
 
 if __name__ == "__main__":
     df = load_and_normalise()
     print("Rows written:", len(df))
-    print("Date range:", df["datetime"].min(), "to", df["datetime"].max())
+    print("Date range:", df["sent"].min(), "to", df["sent"].max())
