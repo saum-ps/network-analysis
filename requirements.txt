@@ -1,0 +1,29 @@
+# Copenhagen Networks Study (CNS) Social Graph Analysis
+# Requirements for the 3-day POC project
+
+# Core data science packages
+pandas>=1.5.0
+numpy>=1.21.0
+
+# Network analysis
+networkx>=2.8.0
+
+# Data processing and storage
+pyarrow>=10.0.0  # For Parquet file support
+
+# Visualization
+matplotlib>=3.5.0
+
+# Jupyter notebook support
+jupyter>=1.0.0
+ipykernel>=6.0.0
+jupytext>=1.17.0
+
+# Optional: GPU support for future GNN work
+torch>=1.12.0
+
+# Development and utilities
+pathlib2>=2.3.0  # For Python < 3.4 compatibility
+
+
+

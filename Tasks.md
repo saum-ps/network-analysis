@@ -145,3 +145,18 @@
 * **Next**: Complete final deliverables - generate PDF insights deck and final validation
 * **Ref**: `circles.csv`, `trend_plot.png` created, community detection working
 
+---
+
+### 2025-08-07  08:15
+* **Progress**: fixed the graph_build script correcting build_multilayer_graph func
+* **Insight**: earlier logic was incorrectly adding edges to build the multilayer graph, now added true unique key
+* **Next**: review the script 3
+* **Ref**: 
+
+---
+
+### 2025-08-07  09:30
+* **Progress**: Created `requirements.txt` with core dependencies, removed optional packages (typing-extensions, python-pptx, reportlab) to simplify environment setup `[0.1]`
+* **Insight**: Streamlined dependencies to essential packages only; removed presentation libraries to focus on core analysis functionality
+* **Next**: Test environment setup with simplified requirements
+* **Ref**: `requirements.txt` created with minimal dependencies
