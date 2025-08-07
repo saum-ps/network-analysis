@@ -184,3 +184,11 @@
 * **Insight**: Small tweak improves consistency of datetime/partitioning without changing downstream schema
 * **Next**: Re-run ingestion to regenerate partitions if needed and sanity-check date ranges
 * **Ref**: Commit updating `01_ingest.py`
+
+---
+
+### 2025-08-07  11:00
+* **Progress**: Slightly updated `relationship_trend` function in `02_graph_build.py` to improve trend detection logic `[2.3]`
+* **Insight**: Refined the relationship trend calculation to better handle edge cases and improve accuracy of growing/fading/stable classifications
+* **Next**: Test updated trend function with sample data and validate classifications
+* **Ref**: Commit updating `02_graph_build.py` with improved trend detection

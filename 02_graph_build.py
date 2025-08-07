@@ -47,6 +47,7 @@ from utils.device import get_device  # GPU helper (currently unused but kept for
 
 # %% [constants]
 SMS_WEIGHT: int = 30          # seconds‑credit per SMS
+MIN_TREND_WEIGHT: int = 2 * SMS_WEIGHT  # minimal recent activity to make a call
 TREND_WIN_DAYS: int = 7       # rolling‑window size for trend/churn
 MIN_EVENTS_PREF: int = 5      # min interactions to label channel preference
 PREF_THRESHOLD: float = 0.60  # 60 % rule
@@ -158,19 +159,31 @@ def detect_circles(G: nx.DiGraph, user: int) -> List[int]:
     return []
 
 
+# replace the whole relationship_trend() with:
 def relationship_trend(df_pair: pd.DataFrame) -> str:
-    if df_pair.empty:
+    if df_pair.empty or "sent" not in df_pair or "weight" not in df_pair:
         return "insufficient_data"
-    df_pair = df_pair.set_index("sent").sort_index()
-    weekly = df_pair["weight"].resample(f"{TREND_WIN_DAYS}D").sum()
+    weekly = (
+        df_pair.set_index("sent")
+               .sort_index()["weight"]
+               .resample(f"{TREND_WIN_DAYS}D").sum()
+               .fillna(0.0)
+    )
     if len(weekly) < 3:
         return "insufficient_data"
-    change = (weekly.iloc[-1] - weekly.iloc[-2]) / max(1e-6, weekly.iloc[-2])
+    prev, curr = weekly.iloc[-2], weekly.iloc[-1]
+    # require some minimum signal to avoid labeling pure noise
+    if (prev + curr) < MIN_TREND_WEIGHT:
+        return "insufficient_data"
+    if prev == 0:
+        return "growing" if curr >= MIN_TREND_WEIGHT else "insufficient_data"
+    change = (curr - prev) / prev
     if change > 0.25:
         return "growing"
     if change < -0.25:
         return "fading"
     return "stable"
+
 
 
 def avg_reply_delay(df_pair: pd.DataFrame) -> float | None:
