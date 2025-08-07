@@ -89,12 +89,16 @@ def collapse_edges(mg: nx.MultiDiGraph) -> nx.DiGraph:
                 "sms_weight": 0,
                 "call_count": 0,
                 "sms_count": 0,
+                "missed_count": 0,
             }
             cg.add_edge(u, v, **edge_data)
         
         if data["channel"] == "call":
-            edge_data["call_weight"] += data["weight"]
-            edge_data["call_count"] += 1
+            if data["weight"] < 0:
+                edge_data["missed_count"] += 1
+            else:
+                edge_data["call_weight"] += data["weight"]
+                edge_data["call_count"] += 1
         else:
             edge_data["sms_weight"] += data["weight"]
             edge_data["sms_count"] += 1
