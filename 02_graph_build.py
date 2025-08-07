@@ -71,8 +71,7 @@ def build_multilayer_graph(df: pd.DataFrame) -> nx.MultiDiGraph:
     G = nx.MultiDiGraph()
     for row in df.itertuples(index=False):
         weight = row.duration if row.channel == "call" else SMS_WEIGHT
-        key = row.channel  # distinguishes parallel edges
-        G.add_edge(row.src, row.dst, key=key, channel=row.channel, weight=weight)
+        G.add_edge(row.src, row.dst, key=f"{row.channel}_{row.timestamp}", channel=row.channel, weight=weight)
     return G
 
 
