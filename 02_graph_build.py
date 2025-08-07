@@ -57,6 +57,7 @@ REPLY_WINDOW: str = "1H"      # only count replies within this window
 SESSION_GAP: str = "2H"       # break conversation after this gap
 MIN_REPLY_PAIRS: int = 3      # need at least this many reply pairs
 REPLY_USE_MEDIAN: bool = True # use median over mean for robustness
+BET_SCALE: int = 1000         # keep the betweenness centrality scale
 
 CHURN_DROP_RATIO: float = 0.40  # current wk inbound < 40 % prev wk
 
@@ -239,9 +240,15 @@ def avg_reply_delay(
 
 
 def extrovert_score(G: nx.DiGraph, top_n: int = 10) -> List[Tuple[int, float]]:
-    deg = {n: sum(data["weight"] for _, _, data in G.out_edges(n, data=True)) for n in G}
-    bet = nx.betweenness_centrality(G, weight="weight", normalized=True)
-    score = {n: deg.get(n, 0) + bet.get(n, 0) * 1000 for n in G}
+    # total interaction strength (in + out)
+    strength = {
+        n: sum(d["weight"] for _,_,d in G.out_edges(n, data=True)) +
+           sum(d["weight"] for _,_,d in G.in_edges(n, data=True))
+        for n in G
+    }
+    # unweighted betweenness so strong ties aren't treated as long distances
+    bet = nx.betweenness_centrality(G, weight=None, normalized=True)
+    score = {n: strength.get(n, 0) + bet.get(n, 0) * BET_SCALE for n in G}
     return sorted(score.items(), key=lambda x: x[1], reverse=True)[:top_n]
 
 

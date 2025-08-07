@@ -200,3 +200,11 @@
 * **Insight**: Refined the reply delay calculation to better capture communication patterns and response behaviors
 * **Next**: Validate updated reply delay metrics against sample conversations
 * **Ref**: Updated reply delay logic in `02_graph_build.py`
+
+---
+
+### 2025-08-07  11:45
+* **Progress**: Enhanced `extrovert_score` function in `02_graph_build.py` to improve social personality analysis `[2.3]`
+* **Insight**: Refined the extroversion calculation to better capture outgoing communication patterns and social centrality
+* **Next**: Test updated extrovert scoring with sample users and validate rankings
+* **Ref**: Updated extrovert score logic in `02_graph_build.py`
