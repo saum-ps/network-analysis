@@ -52,6 +52,12 @@ TREND_WIN_DAYS: int = 7       # rolling‑window size for trend/churn
 MIN_EVENTS_PREF: int = 5      # min interactions to label channel preference
 PREF_THRESHOLD: float = 0.60  # 60 % rule
 MIN_WEIGHT_TOPTIE: int = 90   # ignore ties < 90 s total weight
+
+REPLY_WINDOW: str = "1H"      # only count replies within this window
+SESSION_GAP: str = "2H"       # break conversation after this gap
+MIN_REPLY_PAIRS: int = 3      # need at least this many reply pairs
+REPLY_USE_MEDIAN: bool = True # use median over mean for robustness
+
 CHURN_DROP_RATIO: float = 0.40  # current wk inbound < 40 % prev wk
 
 RAW_PARQUET_DIR = Path("parquet")
@@ -186,19 +192,50 @@ def relationship_trend(df_pair: pd.DataFrame) -> str:
 
 
 
-def avg_reply_delay(df_pair: pd.DataFrame) -> float | None:
+def avg_reply_delay(
+    df_pair: pd.DataFrame,
+    reply_window: str | None = None,
+    session_gap: str | None = None,
+    min_pairs: int | None = None,
+    use_median: bool | None = None
+) -> float | None:
+    import numpy as np
     if df_pair.empty:
         return None
-    df_pair = df_pair.sort_values("sent")
+
+    # SMS-only filter (if channel present)
+    if "channel" in df_pair.columns:
+        df = df_pair[df_pair["channel"] == "sms"].copy()
+        if df.empty:
+            return None
+    else:
+        df = df_pair.copy()
+
+    df = df.sort_values("sent")[["src", "dst", "sent"]].rename(columns={"src": "sender"})
+
+    # Resolve params from constants
+    rw = pd.Timedelta(reply_window or REPLY_WINDOW)
+    sg = pd.Timedelta(session_gap or SESSION_GAP)
+    min_pairs = int(min_pairs or MIN_REPLY_PAIRS)
+    use_median = REPLY_USE_MEDIAN if use_median is None else use_median
+
+    # Burst compression + session breaks
+    gap = df["sent"].diff()
+    new_run = (df["sender"] != df["sender"].shift(1)) | (gap > sg)
+    runs = df.loc[new_run, ["sender", "sent"]].reset_index(drop=True)
+
+    # Replies = alternations within reply window, measure from FIRST msg of prior burst
     delays = []
-    last_out_ts = None
-    last_out_sender = None
-    for row in df_pair.itertuples(index=False):
-        s, d, ts = row.src, row.dst, row.sent
-        if last_out_ts is not None and last_out_sender != s:
-            delays.append((ts - last_out_ts).total_seconds())
-        last_out_ts, last_out_sender = ts, s
-    return None if not delays else sum(delays) / len(delays)
+    for i in range(1, len(runs)):
+        if runs.at[i, "sender"] != runs.at[i-1, "sender"]:
+            dt = (runs.at[i, "sent"] - runs.at[i-1, "sent"]).total_seconds()
+            if 0 <= dt <= rw.total_seconds():
+                delays.append(dt)
+
+    if len(delays) < min_pairs:
+        return None
+    return float(np.median(delays) if use_median else sum(delays) / len(delays))
+
 
 
 def extrovert_score(G: nx.DiGraph, top_n: int = 10) -> List[Tuple[int, float]]:
