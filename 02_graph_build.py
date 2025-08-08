@@ -66,31 +66,6 @@ RAW_PARQUET_DIR = Path("parquet")
 GRAPH_PKL = Path("graph.pkl")
 NODE_CSV = Path("node_metrics.csv")
 
-
-# %% [Helpers]
-def get_pair_df(df_full: pd.DataFrame, a: int, b: int) -> pd.DataFrame:
-    """
-    Return a tidy dataframe of ALL messages/calls between users a and b.
-    Columns: src, dst, sent (datetime), weight (int seconds), channel ('sms'|'call')
-    """
-    df = df_full[( (df_full["src"]==a) & (df_full["dst"]==b) ) |
-                 ( (df_full["src"]==b) & (df_full["dst"]==a) )].copy()
-    if df.empty:
-        return df
-
-    # make sure 'sent' is datetime 
-    if not pd.api.types.is_datetime64_any_dtype(df["sent"]):
-        df["sent"] = pd.to_datetime(df["sent"])
-
-    # compute weight per event (duration for calls, SMS_WEIGHT for sms)
-    df["weight"] = df.apply(
-        lambda r: (r["duration"] if r.get("channel","")=="call" else SMS_WEIGHT),
-        axis=1
-    )
-
-    # keep only the columns downstream functions expect
-    return df[["src","dst","sent","weight","channel"]].sort_values("sent").reset_index(drop=True)
-
 # %% [loader]
 def load_all_partitions(parquet_dir: Path = RAW_PARQUET_DIR) -> pd.DataFrame:
     """Load every Parquet file under *parquet_dir* into one DataFrame."""
@@ -143,6 +118,30 @@ def collapse_edges(mg: nx.MultiDiGraph) -> nx.DiGraph:
             edge_data["sms_count"] += 1
         edge_data["weight"] = edge_data["call_weight"] + edge_data["sms_weight"]
     return cg
+
+# %% [Helpers]
+def get_pair_df_from_graph(mg: nx.MultiDiGraph, a: int, b: int) -> pd.DataFrame:
+    """
+    Extract all events between two users from a MultiDiGraph edge list.
+    Returns DataFrame with: src, dst, sent (datetime), weight, channel.
+    """
+    rows = []
+
+    # Go through both directions: a→b and b→a
+    for u, v in [(a, b), (b, a)]:
+        if mg.has_edge(u, v):
+            for _, _, data in mg.edges(u, v, data=True):
+                sent = data.get("sent")
+                weight = data.get("weight", 0)
+                channel = data.get("channel", None)
+                if sent is not None:
+                    rows.append((u, v, sent, weight, channel))
+
+    df = pd.DataFrame(rows, columns=["src", "dst", "sent", "weight", "channel"])
+    if not df.empty:
+        df = df.sort_values("sent").reset_index(drop=True)
+
+    return df
 
 # %% [callables]
 

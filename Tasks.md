@@ -224,3 +224,11 @@
 * **Insight**: Created shared utility function to improve code reusability and reduce duplication between trend and reply delay calculations
 * **Next**: Test helper function with both dependent functions and validate shared logic
 * **Ref**: Added helper function to `02_graph_build.py`
+
+---
+
+### 2025-08-07  12:30
+* **Progress**: Updated helper function in `02_graph_build.py` to get DataFrame from multilayer graph and repositioned after graph building functions `[2.2]`, `[2.3]`
+* **Insight**: Improved helper function to work directly with multilayer graph output and better code organization by placing utilities after core graph functions
+* **Next**: Test updated helper function with multilayer graph data and validate DataFrame extraction
+* **Ref**: Updated helper function placement and functionality in `02_graph_build.py`
